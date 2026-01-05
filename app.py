@@ -8,13 +8,12 @@ import urllib.parse
 if "GEMINI_KEY" in st.secrets:
     API_KEY = st.secrets["GEMINI_KEY"]
 else:
-    st.error("API ključ nije podešen u Secrets podešavanjima!")
+    st.error("API ključ nedostaje u Secrets!")
     st.stop()
 
 genai.configure(api_key=API_KEY)
-MODEL_NAME = 'gemini-2.5-flash' 
+MODEL_NAME = 'gemini-2.0-flash' 
 
-# --- PODACI O RADOVIMA I ZABRANAMA ---
 LOKALNE_RADNJE = {
     "Beograd": ["Formax Store", "DTD Ribarstvo", "Carpologija", "Alas", "Ribolovac"],
     "Kruševac": ["Predator", "Ribolovačka radnja Profi", "Rasina", "Ribosport"],
@@ -40,10 +39,8 @@ ZABRANE = {
 }
 
 # Inicijalizacija Session State
-if 'shopping_list' not in st.session_state: st.session_state.shopping_list = []
-if 'taktika_tekst' not in st.session_state: st.session_state.taktika_tekst = ""
-if 'mesta_tekst' not in st.session_state: st.session_state.mesta_tekst = ""
-if 'checked_items' not in st.session_state: st.session_state.checked_items = {}
+for key in ['shopping_list', 'taktika_tekst', 'mesta_tekst', 'checked_items']:
+    if key not in st.session_state: st.session_state[key] = [] if 'list' in key or 'tekst' in key else {}
 if 'prikaz_moda' not in st.session_state: st.session_state.prikaz_moda = "📋 Taktika"
 
 def get_weather(grad):
@@ -56,72 +53,41 @@ def get_weather(grad):
         return "N/A"
     except: return "Greška"
 
-# --- 2. INTERFEJS I VIZUELNO PODEŠAVANJE ---
+# --- 2. VIZUELNO PODEŠAVANJE (AGRESIVNI CSS) ---
 st.set_page_config(page_title="Feeder Majstor PRO", page_icon="🎣", layout="centered")
 
-# --- NOVI CSS ZA IPHONE I SKRIVANJE BRENDINGA ---
 st.markdown("""
     <style>
-    /* Sakriva krunu (Viewer) i profilnu sliku desno */
-    .stAppToolbar {
-        display: none !important;
-    }
-    
-    /* Sakriva donji "Made with Streamlit" footer */
-    footer {
-        visibility: hidden !important;
-        height: 0px !important;
-    }
-
-    /* Sakriva Deploy dugme i ostale statusne ikonice na vrhu */
-    div[data-testid="stStatusWidget"] {
-        display: none !important;
-    }
-
-    /* POPRAVKA ZA SIDEBAR: Ne sakrivamo ceo header jer nam treba dugme za meni */
-    /* Sakrivamo samo pozadinu headera i ostale elemente, ali ostavljamo dugme vidljivim */
-    header[data-testid="stHeader"] {
-        background-color: rgba(0,0,0,0) !important;
-        color: white !important;
-    }
-    
-    /* Podešavanje prostora na vrhu za iPhone Notch */
-    .block-container {
-        padding-top: 2rem !important;
-    }
+    /* Sakriva Toolbar (krunu, GitHub, profil) */
+    .stAppToolbar { display: none !important; }
+    /* Sakriva Footer */
+    footer { visibility: hidden !important; height: 0px !important; }
+    /* Sakriva statusne ikonice */
+    [data-testid="stStatusWidget"] { display: none !important; }
+    /* Sakriva Viewer Badge (donji desni ugao) */
+    .stAppViewerBadge { display: none !important; }
+    /* Smanjuje header prostor */
+    header { visibility: hidden !important; height: 0px !important; }
+    /* Pomeranje sadržaja na vrhu */
+    .block-container { padding-top: 1rem !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- SIDEBAR SADRŽAJ ---
-with st.sidebar:
-    st.header("🛒 Lokalna Oprema")
-    grad_input = st.session_state.get('grad_widget', 'Beograd')
-    map_url = f"https://www.google.com/maps/search/ribolovacka+oprema+{grad_input}"
-    st.link_button(f"📍 Mape u gradu: {grad_input}", map_url, use_container_width=True)
-    st.markdown("---")
-    nadjen_grad = next((g for g in LOKALNE_RADNJE if grad_input.lower() == g.lower()), None)
-    if nadjen_grad:
-        st.write(f"**Preporučene radnje ({nadjen_grad}):**")
-        for r in LOKALNE_RADNJE[nadjen_grad]: st.caption(f"✅ {r}")
-
-# --- GLAVNI EKRAN ---
+# --- 3. GLAVNI EKRAN ---
 st.title("🎣 Feeder Majstor PRO")
 
 with st.container(border=True):
     c1, c2 = st.columns([1, 2])
     with c1: grad = st.text_input("📍 Grad:", "Beograd", key="grad_widget")
     with c2: brendovi = st.multiselect("🥣 Brendovi:", [
-        "Svi brendovi", "Gica Mix", "Maros Mix", "Sensas", 
-        "VDE", "Haldorado", "Benzar Mix", "Feedermania", 
-        "Meleg Bait", "Bait Service Beograd", "Formax Elegance", "CPK"
+        "Svi brendovi", "Gica Mix", "Maros Mix", "Sensas", "VDE", 
+        "Haldorado", "Benzar Mix", "Feedermania", "Formax Elegance", "CPK"
     ], default=["Svi brendovi"])
 
     c3, c4 = st.columns(2)
     with c3: voda = st.selectbox("💧 Voda:", ["Stajaća voda", "Spori tok", "Brza reka", "Komercijala"])
-    with c4: 
-        riba = st.selectbox("🐟 Riba:", list(ZABRANE.keys()))
-        st.caption(f"Lovostaj: {ZABRANE[riba]['info']}")
-
+    with c4: riba = st.selectbox("🐟 Riba:", list(ZABRANE.keys()))
+    
     iskustvo = st.select_slider("🧠 Iskustvo:", ["Početnik", "Srednje", "Iskusan"])
     budzet = st.radio("💰 Budžet:", ["Ekonomičan", "Standard", "Premium"], horizontal=True)
 
@@ -129,7 +95,7 @@ if st.button("SASTAVI KOMPLETAN PLAN 🚀", use_container_width=True, type="prim
     vreme_info = get_weather(grad)
     try:
         model = genai.GenerativeModel(MODEL_NAME)
-        prompt = f"Ekspert si za feeder. Lokacija {grad}, Vreme {vreme_info}, Riba {riba}, Voda {voda}, Brendovi {brendovi}, Budžet {budzet}. Daj [TAKTIKA], [MESTA] i [LISTA] razdvojeno zarezima."
+        prompt = f"Ekspert si za feeder. Lokacija {grad}, Vreme {vreme_info}, Riba {riba}, Voda {voda}, Brendovi {brendovi}, Budžet {budzet}. Daj [TAKTIKA], [MESTA] i [LISTA] (razdvojeno zarezima)."
         with st.spinner('Sastavljam plan...'):
             res_text = model.generate_content(prompt).text
             if "[LISTA]" in res_text and "[MESTA]" in res_text:
@@ -138,19 +104,24 @@ if st.button("SASTAVI KOMPLETAN PLAN 🚀", use_container_width=True, type="prim
                 lista_raw = res_text.split("[LISTA]")[1].strip()
                 st.session_state.shopping_list = [i.strip() for i in lista_raw.split(",") if i.strip()]
                 st.session_state.checked_items = {item: False for item in st.session_state.shopping_list}
+                st.session_state.prikaz_moda = "📋 Taktika"
     except Exception as e:
         st.error(f"Greška: {e}")
 
+# --- 4. PRIKAZ REZULTATA (SA TABOM ZA RADNJE) ---
 if st.session_state.taktika_tekst:
     st.markdown("---")
-    st.session_state.prikaz_moda = st.radio("Izaberi prikaz:", ["📋 Taktika", "📍 Gde pecati?", "🛒 Šoping Lista"], horizontal=True, key="nav_radio")
+    st.session_state.prikaz_moda = st.radio(
+        "Izaberi prikaz:", 
+        ["📋 Taktika", "📍 Gde pecati?", "🛒 Šoping Lista", "🛒 Prodavnice"], 
+        horizontal=True, key="nav_radio"
+    )
 
     if st.session_state.prikaz_moda == "📋 Taktika":
         st.markdown(st.session_state.taktika_tekst)
     elif st.session_state.prikaz_moda == "📍 Gde pecati?":
         st.markdown(st.session_state.mesta_tekst)
-    else:
-        st.subheader("🛒 Spisak za kupovinu:")
+    elif st.session_state.prikaz_moda == "🛒 Šoping Lista":
         selektovano = []
         for i, item in enumerate(st.session_state.shopping_list):
             res = st.checkbox(item, key=f"cb_f_{i}", value=st.session_state.checked_items.get(item, False))
@@ -163,3 +134,17 @@ if st.session_state.taktika_tekst:
             with c1: st.download_button("💾 TXT", txt, "spisak.txt", use_container_width=True)
             with c2: st.link_button("📲 WA", f"https://wa.me/?text={encoded_txt}", use_container_width=True)
             with c3: st.link_button("💜 Viber", f"viber://forward?text={encoded_txt}", use_container_width=True)
+    
+    # NOVI TAB: PRODAVNICE I MAPE (Umesto Sidebara)
+    elif st.session_state.prikaz_moda == "🛒 Prodavnice":
+        st.subheader(f"Prodavnice u gradu {grad}")
+        map_url = f"https://www.google.com/maps/search/ribolovacka+oprema+{grad}"
+        st.link_button(f"🔍 Otvori Google Mapu za: {grad}", map_url, use_container_width=True)
+        
+        nadjen_grad = next((g for g in LOKALNE_RADNJE if grad.lower() == g.lower()), None)
+        if nadjen_grad:
+            st.write(f"**Preporučene radnje u gradu {nadjen_grad}:**")
+            for r in LOKALNE_RADNJE[nadjen_grad]:
+                st.success(f"🏬 {r}")
+        else:
+            st.info("Koristi dugme iznad da vidiš sve radnje na mapi.")
