@@ -74,13 +74,31 @@ def get_weather(grad):
 
 # --- 2. INTERFEJS ---
 st.set_page_config(page_title="Feeder Majstor PRO", page_icon="🎣", layout="centered")
-# --- SAKRIVANJE STREAMLIT ELEMENATA (Fork, GitHub, Menu, Footer) ---
+
+# --- TOTALNO SAKRIVANJE SVIH STREAMLIT ELEMENATA ---
 st.markdown("""
     <style>
+    /* Sakriva gornji meni (tri tačkice) */
     #MainMenu {visibility: hidden;}
+    
+    /* Sakriva donji "Made with Streamlit" footer */
     footer {visibility: hidden;}
-    .stAppDeployButton {display:none;}
+    
+    /* Sakriva beli bar na vrhu */
     header {visibility: hidden;}
+    
+    /* Sakriva Toolbar (krunu i profilnu sliku u donjem desnom uglu) */
+    div[data-testid="stStatusWidget"] {display: none !important;}
+    .stAppToolbar {display: none !important;}
+    
+    /* Sakriva "Deploy" dugme ako je ostalo */
+    .stDeployButton {display: none !important;}
+    
+    /* Pomera sadržaj skroz do vrha jer smo sakrili header */
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 0rem;
+    }
     </style>
     """, unsafe_allow_html=True)
 
