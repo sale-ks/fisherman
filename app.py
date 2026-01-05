@@ -74,6 +74,15 @@ def get_weather(grad):
 
 # --- 2. INTERFEJS ---
 st.set_page_config(page_title="Feeder Majstor PRO", page_icon="🎣", layout="centered")
+# --- SAKRIVANJE STREAMLIT ELEMENATA (Fork, GitHub, Menu, Footer) ---
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stAppDeployButton {display:none;}
+    header {visibility: hidden;}
+    </style>
+    """, unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("🛒 Lokalna Oprema")
