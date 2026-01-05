@@ -2,114 +2,165 @@ import streamlit as st
 import google.generativeai as genai
 import requests
 from datetime import datetime
+import urllib.parse
 
-# --- 1. KONFIGURACIJA I PODACI ---
-API_KEY = "AIzaSyDiktOM2X-FVEJZu_A4pIex_m8KTDWQ8K8" # Zameni svojim ključem
+# --- 1. KONFIGURACIJA ---
+# Za Web hosting: koristi st.secrets["GEMINI_KEY"]
+import streamlit as st
+
+if "GEMINI_KEY" in st.secrets:
+    API_KEY = st.secrets["GEMINI_KEY"]
+else:
+    # Ovo služi samo da ti javi grešku ako zaboraviš da podesiš Secrets
+    st.error("API ključ nije podešen u Secrets podešavanjima!")
+    st.stop()
+
 genai.configure(api_key=API_KEY)
 
-# Podaci o zabranama (Lovostaj u Srbiji/Regionu)
-# Formati: (mesec_pocetka, dan_pocetka, mesec_kraja, dan_kraja)
-ZABRANE = {
-    "Šaran": {"period": (4, 1, 5, 31), "info": "01. april - 31. maj"},
-    "Deverika": {"period": (4, 15, 5, 31), "info": "15. april - 31. maj"}, # ISPRAVLJENO: 5. mesec, 31. dan
-    "Mrena": {"period": (4, 15, 5, 31), "info": "15. april - 31. maj"},
-    "Skobalj": {"period": (4, 15, 5, 31), "info": "15. april - 31. maj"},
-    "Babuška": {"period": None, "info": "Nema zabrane (invazivna vrsta)"},
-    "Amur": {"period": None, "info": "Nema zabrane"}
+MODEL_NAME = 'gemini-2.5-flash' 
+
+LISTA_PROIZVODJACA = [
+    "Svi brendovi", "Gica Mix", "Maros Mix", "Sensas", 
+    "VDE (Marcel Van Den Eynde)", "Haldorado", "Benzar Mix", 
+    "Feedermania", "Meleg Bait", "Bait Service Beograd", 
+    "Formax Elegance", "CPK", "Browning"
+]
+
+LOKALNE_RADNJE = {
+    "Beograd": ["Formax Store", "DTD Ribarstvo", "Carpologija", "Alas", "Ribolovac"],
+    "Kruševac": ["Predator", "Ribolovačka radnja Profi", "Rasina", "Ribosport"],
+    "Niš": ["Formax Store Niš", "Plovak-Mare", "Enter Fishing Shop", "Eagle Eye"],
+    "Novi Sad": ["Formax Store", "Travar", "Riboshop", "Carpologija NS"],
+    "Kragujevac": ["Ribosport", "Srebrna Udica", "Marlin", "Formax Store KG"],
+    "Čačak": ["Barbus", "Ribolovac Čačak", "Udica"],
+    "Kraljevo": ["Ribolovac KV", "Trofej", "Blinker"],
+    "Subotica": ["Plovak SU", "Ribomarket", "Zlatna Udica"],
+    "Šabac": ["Zlatna Ribica", "Delfin", "Šaran Šabac"],
+    "Smederevo": ["Dunavski Vuk", "Ribolovac SD"],
+    "Pančevo": ["Tamiški Ribolovac", "Plovak PA"],
+    "Valjevo": ["Kolubara Ribolov", "Keder"]
 }
 
-# Funkcija za automatsko određivanje godišnjeg doba
-def get_current_season():
-    month = datetime.now().month
-    if 3 <= month <= 5: return "Proleće"
-    elif 6 <= month <= 8: return "Leto"
-    elif 9 <= month <= 11: return "Jesen"
-    else: return "Zima"
+ZABRANE = {
+    "Šaran": {"info": "01. apr - 31. maj"},
+    "Deverika": {"info": "15. apr - 31. maj"},
+    "Mrena": {"info": "15. apr - 31. maj"},
+    "Skobalj": {"info": "15. apr - 31. maj"},
+    "Babuška": {"info": "Nema zabrane"},
+    "Amur": {"info": "Nema zabrane"}
+}
 
-# Funkcija za provere zabrane
-def proveri_zabranu(riba):
-    today = datetime.now()
-    podaci = ZABRANE.get(riba)
-    
-    if not podaci or not podaci["period"]:
-        return False, podaci["info"] if podaci else "Nema podataka"
-    
-    try:
-        m_start, d_start, m_end, d_end = podaci["period"]
-        start_date = datetime(today.year, m_start, d_start)
-        end_date = datetime(today.year, m_end, d_end)
-        
-        u_zabrani = start_date <= today <= end_date
-        return u_zabrani, podaci["info"]
-    except ValueError:
-        return False, "Greška u kalendaru zabrana"
+# Inicijalizacija Session State-a
+if 'shopping_list' not in st.session_state:
+    st.session_state.shopping_list = []
+if 'taktika_tekst' not in st.session_state:
+    st.session_state.taktika_tekst = ""
+if 'mesta_tekst' not in st.session_state:
+    st.session_state.mesta_tekst = ""
+if 'checked_items' not in st.session_state:
+    st.session_state.checked_items = {}
+if 'prikaz_moda' not in st.session_state:
+    st.session_state.prikaz_moda = "📋 Taktika"
 
-# Funkcija za vreme (Open-Meteo)
 def get_weather(grad):
     try:
-        geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={grad}&count=1&format=json"
-        geo_res = requests.get(geo_url).json()
-        if "results" in geo_res:
-            lat, lon = geo_res["results"][0]["latitude"], geo_res["results"][0]["longitude"]
-            w_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&hourly=surface_pressure"
-            w_res = requests.get(w_url).json()
-            temp = w_res["current_weather"]["temperature"]
-            press = w_res["hourly"]["surface_pressure"][0]
-            return f"Temp: {temp}°C, Pritisak: {press}hPa"
-        return "Vreme: nedostupno"
-    except: return "Vreme: greška"
+        geo = requests.get(f"https://geocoding-api.open-meteo.com/v1/search?name={grad}&count=1&format=json").json()
+        if "results" in geo:
+            res = geo["results"][0]
+            w = requests.get(f"https://api.open-meteo.com/v1/forecast?latitude={res['latitude']}&longitude={res['longitude']}&current_weather=true").json()
+            return f"{w['current_weather']['temperature']}°C"
+        return "N/A"
+    except: return "Greška"
 
 # --- 2. INTERFEJS ---
-st.set_page_config(page_title="Feeder Majstor Smart", page_icon="🎣")
+st.set_page_config(page_title="Feeder Majstor PRO", page_icon="🎣", layout="centered")
 
-# Automatski podaci
-danasnji_datum = datetime.now().strftime("%d. %m. %Y.")
-sezona = get_current_season()
+with st.sidebar:
+    st.header("🛒 Lokalna Oprema")
+    grad_input = st.session_state.get('grad_widget', 'Beograd')
+    map_url = f"https://www.google.com/maps/search/ribolovacka+oprema+{grad_input}"
+    st.link_button(f"📍 Mape u gradu: {grad_input}", map_url, use_container_width=True)
+    st.markdown("---")
+    nadjen_grad = next((g for g in LOKALNE_RADNJE if grad_input.lower() == g.lower()), None)
+    if nadjen_grad:
+        st.write(f"**Preporučene radnje ({nadjen_grad}):**")
+        for r in LOKALNE_RADNJE[nadjen_grad]: st.caption(f"✅ {r}")
 
 st.title("🎣 Feeder Majstor PRO")
-st.subheader(f"📅 Danas je: {danasnji_datum} | Sezona: {sezona}")
 
-grad = st.text_input("📍 Unesi grad u kom pecaš:", "Beograd")
+with st.container(border=True):
+    c1, c2 = st.columns([1, 2])
+    with c1: grad = st.text_input("📍 Grad:", "Beograd", key="grad_widget")
+    with c2: brendovi = st.multiselect("🥣 Brendovi:", LISTA_PROIZVODJACA, default=["Svi brendovi"])
 
-col1, col2 = st.columns(2)
-with col1:
-    voda = st.selectbox("Tip vode:", ["Stajaća voda", "Spori tok", "Brza reka", "Komercijala"])
-    riba = st.selectbox("Ciljana riba:", list(ZABRANE.keys()))
-with col2:
-    iskustvo = st.select_slider("Tvoje iskustvo:", ["Početnik", "Srednje", "Iskusan"])
+    c3, c4 = st.columns(2)
+    with c3: voda = st.selectbox("💧 Voda:", ["Stajaća voda", "Spori tok", "Brza reka", "Komercijala"])
+    with c4: 
+        riba = st.selectbox("🐟 Riba:", list(ZABRANE.keys()))
+        st.caption(f"Lovostaj: {ZABRANE[riba]['info']}")
 
-# Provera zabrane i ispis
-u_zabrani, info_period = proveri_zabranu(riba)
-if u_zabrani:
-    st.error(f"⚠️ PAŽNJA: **{riba}** je trenutno u ZABRANI (Lovostaj)! Period: {info_period}. Molimo te da ribu odmah vratiš u vodu.")
-else:
-    st.success(f"✅ {riba} nije u zabrani. Lovostaj je: {info_period}.")
+    iskustvo = st.select_slider("🧠 Iskustvo:", ["Početnik", "Srednje", "Iskusan"])
+    budzet = st.radio("💰 Budžet:", ["Ekonomičan", "Standard", "Premium"], horizontal=True)
 
-# --- 3. GENERISANJE TAKTIKE ---
-if st.button("SASTAVI MOJU TAKTIKU 🚀"):
-    info_vreme = get_weather(grad)
-    
-    # Model
-    model = genai.GenerativeModel('gemini-2.5-flash')
-    
-    prompt = f"""
-    Ti si profesionalni ribolovac. Danas je {danasnji_datum}, sezona je {sezona}.
-    Vreme na lokaciji {grad} je {info_vreme}.
-    Korisnik peca ribu: {riba} na vodi: {voda}.
-    Njegovo iskustvo je {iskustvo}.
+# --- GLAVNA AKCIJA ---
+if st.button("SASTAVI KOMPLETAN PLAN 🚀", use_container_width=True, type="primary"):
+    vreme_info = get_weather(grad)
+    try:
+        model = genai.GenerativeModel(MODEL_NAME)
+        prompt = f"""
+        Ti si feeder ribolovac. Lokacija {grad}, Vreme {vreme_info}, Riba {riba}, Voda {voda}, Brendovi {brendovi}, Budžet {budzet}.
+        
+        [TAKTIKA]
+        Ovde napiši detaljan plan, konkretne Formax Elegance ili druge izabrane brendove i mamce.
+        [MESTA]
+        Navedi 3 mesta u okolini {grad}.
+        [LISTA]
+        Navedi SVE artikle (hrana, mamci, udice) razdvojene zarezom.
+        """
+        
+        with st.spinner('Sastavljam plan...'):
+            res_text = model.generate_content(prompt).text
+            if "[LISTA]" in res_text and "[MESTA]" in res_text:
+                st.session_state.taktika_tekst = res_text.split("[TAKTIKA]")[1].split("[MESTA]")[0].strip()
+                st.session_state.mesta_tekst = res_text.split("[MESTA]")[1].split("[LISTA]")[0].strip()
+                lista_raw = res_text.split("[LISTA]")[1].strip()
+                st.session_state.shopping_list = [i.strip() for i in lista_raw.split(",") if i.strip()]
+                st.session_state.checked_items = {item: False for item in st.session_state.shopping_list}
+                st.session_state.prikaz_moda = "📋 Taktika"
+    except Exception as e:
+        st.error(f"Greška: {e}")
 
-    Sastavi preciznu taktiku na srpskom jeziku:
-    1. Recept za hranu prilagođen temperaturi od {info_vreme}.
-    2. Najbolji sistem i mamac.
-    3. Kratak savet za ovu sezonu ({sezona}).
-    """
+# --- PRIKAZ REZULTATA ---
+if st.session_state.taktika_tekst:
+    st.markdown("---")
+    st.session_state.prikaz_moda = st.radio(
+        "Izaberi prikaz:", 
+        ["📋 Taktika", "📍 Gde pecati?", "🛒 Šoping Lista"], 
+        index=["📋 Taktika", "📍 Gde pecati?", "🛒 Šoping Lista"].index(st.session_state.prikaz_moda),
+        horizontal=True,
+        key="nav_radio_pro"
+    )
 
-    with st.spinner('Analiziram uslove...'):
-        try:
-            response = model.generate_content(prompt)
-            st.markdown("---")
-            st.markdown(response.text)
-            if u_zabrani:
-                st.warning("Napomena: Taktika je generisana u edukativne svrhe, poštuj pravila lovostaja!")
-        except Exception as e:
-            st.error(f"Greška: {e}")
+    if st.session_state.prikaz_moda == "📋 Taktika":
+        st.markdown(st.session_state.taktika_tekst)
+    elif st.session_state.prikaz_moda == "📍 Gde pecati?":
+        st.markdown(st.session_state.mesta_tekst)
+    else:
+        st.subheader("🛒 Spisak za kupovinu:")
+        selektovano = []
+        for i, item in enumerate(st.session_state.shopping_list):
+            is_checked = st.checkbox(item, key=f"cb_f_{i}", value=st.session_state.checked_items.get(item, False))
+            st.session_state.checked_items[item] = is_checked
+            if is_checked: selektovano.append(item)
+            
+        st.markdown("---")
+        if selektovano:
+            txt = f"SPISAK ZA PECANJE ({grad}):\n" + "\n".join([f"- {s}" for s in selektovano])
+            encoded_txt = urllib.parse.quote(txt)
+            
+            c1, c2, c3 = st.columns(3)
+            with c1: st.download_button("💾 Sačuvaj", txt, "spisak.txt", use_container_width=True)
+            with c2: st.link_button("📲 WhatsApp", f"https://wa.me/?text={encoded_txt}", use_container_width=True)
+            with c3: st.link_button("💜 Viber", f"viber://forward?text={encoded_txt}", use_container_width=True)
+        else:
+            st.info("Štikliraj stavke koje ti trebaju.")
